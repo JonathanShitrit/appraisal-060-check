@@ -8,7 +8,7 @@ Principles touched (`docs/Design Principles.md`): deterministic limits, real che
 
 What changed:
 - The rules load from the plugin at every session start; nothing to save or paste by hand after an update. The session start also runs migrations on a new version and checks once a day for an update; Claude asks before you install one. There's no one-step undo; a bad release is fixed by the next one.
-- A guard enforces protected files (`calibration.csv`, `settings/sites.json`, the plugin's own files), the data-host allowlist and the browser limits. It denies web search.
+- A guard enforces protected files (`calibration.csv`, `settings/sites.json`, the plugin's own files), the data-host allowlist and the browser limits. It denies web search, and checks the desktop chat's own fetch tool (`mcp__workspace__web_fetch`) against the same data-host list as WebFetch.
 - Read-tier browser (its own logged-in profile; needs Node): Claude reads pages only on sites you enabled in `settings/sites.json`, with `origin` and `terms_checked_on` filled in by you. Edits to that file take effect in a new chat.
 - The browser finds the selected folder on the desktop app: the app tells only the session-start hook which folder is selected, so the hook leaves the path in the chat's own plugin-data folder and the browser server waits up to 10 seconds for it.
 - New setup skill. `score_calibration.py` reads `shared/evals/` when given no file names.

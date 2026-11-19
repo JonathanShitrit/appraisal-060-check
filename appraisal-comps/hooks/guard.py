@@ -2,7 +2,7 @@
 """
 guard.py - the plugin's PreToolUse hook. Allows, denies or asks on every
 tool call matched by hooks.json: Edit, Write, MultiEdit, NotebookEdit,
-WebFetch, WebSearch (always denied), Bash (both the desktop app's own Bash tool and the sandbox's
+WebFetch (and the chat side's mcp__workspace__web_fetch), WebSearch (always denied), Bash (both the desktop app's own Bash tool and the sandbox's
 mcp__workspace__bash), and (Task 6) the browser's MCP tools.
 
 This is a deterministic limit (Design Principles, "Trust"), not an
@@ -81,6 +81,8 @@ WEBSEARCH_REASON = ("web search is not allowed in this project. Network use is r
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 BASH_TOOLS = ("Bash", "mcp__workspace__bash")
+# WebFetch, and the desktop chat side's own fetch tool (desktop check, 2026-11-19).
+WEBFETCH_TOOLS = ("WebFetch", "mcp__workspace__web_fetch")
 
 # The app names plugin MCP tools mcp__plugin_<plugin>_<server>__<tool>; this
 # plugin's browser MCP server is named "browser", and its tools (Playwright's)
@@ -327,7 +329,7 @@ def decide(tool_name: str, tool_input: dict[str, object], workspace: Path | None
     """Pure: no I/O, no filesystem writes."""
     if tool_name in EDIT_TOOLS:
         return _decide_edit(tool_name, tool_input)
-    if tool_name == "WebFetch":
+    if tool_name in WEBFETCH_TOOLS:
         return _decide_webfetch(tool_input)
     if tool_name == "WebSearch":
         return Decision("deny", WEBSEARCH_REASON)
