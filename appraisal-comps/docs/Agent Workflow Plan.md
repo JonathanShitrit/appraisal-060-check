@@ -1,6 +1,6 @@
 # Appraisal Comps: why the workflow is built this way
 
-Design rationale for 0.6.0. The general checklist is `Design Principles.md`. The rules the agent follows are in `rules.md` (loaded by the SessionStart hook), and the stage steps are in the skills. If this file disagrees with either, they win. Scope: what runs today in the Claude desktop app (shell, files, skills, subagents, NYC Open Data). No custom harness.
+Design rationale for 0.7.0. The general checklist is `Design Principles.md`. The rules the agent follows are in `rules.md` (loaded by the SessionStart hook), and the stage steps are in the skills. If this file disagrees with either, they win. Scope: what runs today in the Claude desktop app (shell, files, skills, subagents, NYC Open Data). No custom harness.
 
 ## 1. Design in one paragraph
 
@@ -23,7 +23,7 @@ One agent with a computer, held inside a fixed six-stage workflow (rungs 2 and 3
 | Calibration set + scorer | Not knowing whether plan reading is good enough |
 | SessionStart hook (rules, migrations, update check) | Rules that drift out of date in the chat; an update he never hears is ready |
 | PreToolUse guard | A protected-file or network rule that's only probabilistic; an injected listing talking the model past it |
-| Read-tier browser (Playwright MCP, dedicated profile) | Needing his logged-in sessions on enabled sites without handing Claude his personal browser or credentials |
+| Read-tier browser (Playwright MCP, dedicated profile) | Needing his logged-in sessions on the work sites without handing Claude his personal browser or credentials |
 
 Re-test every part when the model changes, and remove one part at a time. On clean, fully dimensioned plans a stronger model may not need the blind reviewer, but only the calibration set can show that.
 
@@ -62,7 +62,7 @@ Once a month, run the consolidate-memory skill over `lessons.md` and the buildin
 
 | Property | In this workflow |
 | --- | --- |
-| Untrusted input | Present: listing text, captions, pasted emails, and page text the browser reads on enabled sites. Treated as data |
+| Untrusted input | Present: listing text, captions, pasted emails, and page text the browser reads on the work sites. Treated as data |
 | Sensitive data | Present: his adjustments and value, and in firm mode comps linked to assignments. Client and lender details are kept out |
 | Changes state / talks outside | Must be absent, beyond what the PreToolUse guard enforces: writes stay in the folder, and network use is the read-only list in `rules.md` (Rules) |
 
@@ -70,10 +70,10 @@ Each session already has two of the three properties, so the third must be remov
 
 ## 7. Evals
 
-1. **Plans.** He supplies 20 to 30 past plans with his own square footage (`shared/evals/plans/`, `calibration.csv` with a plan type). Run each 3 times in fresh sessions and log each run in `runs.csv`.
-2. **Score.** `python3 -I ${CLAUDE_PLUGIN_ROOT}/evals/score_calibration.py --tol-pct <his tolerance>`, run from the Appraisal Comps folder (it reads `shared/evals/calibration.csv` and `runs.csv`; the guard denies any command that names `calibration.csv`). Judge on pass^k: 75% per run is 42% three in a row. Read the transcript of every miss, starting with misses rated HIGH confidence.
+1. **Plans.** He supplies 20 to 30 past plans with his own square footage (the Appraisal Comps folder's `shared/evals/plans/`, `calibration.csv` with a plan type). Run each 3 times in fresh sessions and log each run in `runs.csv`.
+2. **Score.** `python3 -I ${CLAUDE_PLUGIN_ROOT}/evals/score_calibration.py --tol-pct <his tolerance>`, run from an Appraisal Comps folder, his or your dev workspace (it reads `shared/evals/calibration.csv` and `runs.csv`; the guard denies any command that names `calibration.csv`). Judge on pass^k: 75% per run is 42% three in a row. Read the transcript of every miss, starting with misses rated HIGH confidence.
 3. **Decide by plan type.** Go live only on the plan types that pass, e.g. "fully dimensioned OK; schematic and combined units measured by hand."
 4. **Comp pool.** For 5 past assignments, check that his chosen comps land in the ranking's top 10 and that its exclusions were right.
 5. **Two suites.** Capability (hard cases that fail now) and regression (must stay near 100%). Re-run both, plus `run_tests.py`, before every release and on every model change.
 
-Status at 0.4.0 through 0.6.0: script tests pass (`run_tests.py`). The calibration set is empty. Nothing has been measured on the current model yet. No live work until it has.
+Status at 0.4.0 through 0.7.0: script tests pass (`run_tests.py`). The calibration set is empty. Nothing has been measured on the current model yet. No live work until it has.

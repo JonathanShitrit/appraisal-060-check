@@ -9,8 +9,20 @@ Claude prepares comp data and drafts. The appraiser makes every selection, adjus
 | Agent rules, workflow stages, folder ownership | shown by the plugin at the start of every session |
 | Step-by-step for each stage | the plugin's skills, run automatically for each stage |
 | Measurement conventions, ranking weights | `settings/conventions.md` |
-| Which sites the browser can read, and on what terms | `settings/sites.json` |
+| Which sites the browser can read | built into the plugin (OneKey MLS, Zillow, AppraisalPort, Reggora, ValueConnect, DwellingBlocks, Aivre) |
 | What changed in each version | shown by the plugin when an update installs |
+
+## What to say to Claude
+
+You don't need any commands. Say what you want:
+
+| To | Say |
+| --- | --- |
+| set up this folder (once) | "Set up this folder" |
+| start a job | "New assignment: 123 Main St, Brooklyn" |
+| read a work site | "Open Zillow" or paste a listing link |
+| finish a job | "This assignment is done" |
+| send what Claude learned | "Run the learning export" |
 
 ## The update loop
 
@@ -23,8 +35,7 @@ Claude prepares comp data and drafts. The appraiser makes every selection, adjus
 
 - In the Claude desktop app: Customize → Directory → Plugins → Personal → **+** → Add marketplace → `JonathanShitrit/appraisal-comps-releases`, then install `appraisal-comps`.
 - Select an empty folder for this workflow (not one synced by OneDrive, iCloud or another sync service).
-- Run the setup skill. It creates this folder's files, runs the test suite, and asks for your contributor code and export mode.
-- To let Claude read a work site, first check that its terms allow a logged-in read-only assistant. Then fill in its `origin` and `terms_checked_on` in `settings/sites.json` yourself (Claude can't write that file), and start a new chat. Leave both blank for any site you haven't checked.
+- Say "Set up this folder". Claude creates this folder's files, runs the test suite, and asks for your contributor code and export mode.
 - Confirm `python3` runs and HTTPS downloads work, and that Node is installed (the browser needs it).
 
 ## Don't

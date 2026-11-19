@@ -3,9 +3,8 @@
 session_start.py - the plugin's SessionStart hook. Loads product/rules.md
 as the session's context, finds the appraiser's Appraisal Comps folder (the
 "workspace"), and on a new plugin version runs any pending migrations and
-ledger.py check before recording the new version as seen. It also reports
-a settings/sites.json he needs to fix (BROWSER_OFF) and the daily update
-check.
+ledger.py check before recording the new version as seen. It also runs
+the daily update check.
 
 Reads the hook's JSON payload on stdin and uses its "cwd" to find the
 workspace (see tools/workspace.py for the search order). If stdin is empty
@@ -33,14 +32,9 @@ from pathlib import Path
 from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-from workspace import plugin_root, plugin_version, workspace_candidates, write_workspace_handoff  # noqa: E402
+from workspace import plugin_root, plugin_version, workspace_candidates  # noqa: E402
 from migrations import MigrationError, parse_version, run_pending  # noqa: E402
 from update_check import DEFAULT_SOURCE, INSTALL_HOW, failure_reason, fetch_latest, open_jobs  # noqa: E402
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "browser"))
-from sites import load_sites  # noqa: E402
-
-NO_SITE_ENABLED = "no site enabled in settings/sites.json"  # same words as browser/launch.py
 
 MIGRATION_FAILED_FOLLOW_UP = (
     "Start no assignment work. Tell him. If an assignment is open, log "
@@ -263,26 +257,6 @@ def update_line(workspace: Path, state: PluginState, today: str) -> str:
     return _version_line(workspace, latest.version)
 
 
-def browser_off_line(workspace: Path) -> str:
-    """The BROWSER_OFF line for settings/sites.json, or "" for none (R18).
-
-    Reported when the file fails to load (invalid JSON, with its line and
-    column, or the wrong shape), when a site he has started to fill in
-    (a non-blank origin) is still disabled, or when no site is enabled at
-    all (a fresh install), so Claude asks him to add the site he needs
-    instead of calling the browser broken. A missing file says nothing.
-    """
-    sites_path = workspace / "settings" / "sites.json"
-    if not sites_path.exists():
-        return ""
-    enabled_sites, problems = load_sites(sites_path)
-    if problems:
-        return "BROWSER_OFF " + "; ".join(problems)
-    if not enabled_sites:
-        return "BROWSER_OFF " + NO_SITE_ENABLED
-    return ""
-
-
 def workspace_lines(start: Path) -> list[str]:
     """Every status line to show after the rules. If any step fails, the
     lines gathered so far are kept and an "ERROR: ..." line is added."""
@@ -292,11 +266,7 @@ def workspace_lines(start: Path) -> list[str]:
         if len(candidates) != 1:
             return [no_workspace_line(candidates)]
         workspace = candidates[0]
-        write_workspace_handoff(workspace)  # first, so the browser server isn't kept waiting
         lines.extend(status_lines(workspace))
-        browser_line = browser_off_line(workspace)
-        if browser_line:
-            lines.append(browser_line)
         update = update_line(workspace, read_plugin_state(workspace), date.today().isoformat())
         if update:
             lines.append(update)

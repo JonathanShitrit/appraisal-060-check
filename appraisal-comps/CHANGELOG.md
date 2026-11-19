@@ -2,26 +2,27 @@
 
 Release steps: `maintainer/Maintainer Checklist.md` step 10.
 
-## 0.6.0 (2026-11-18)
+## 0.7.0 (2026-11-19)
+
+0.6.0 was never released; everything below ships in 0.7.0 for the first time.
 
 Principles touched (`docs/Design Principles.md`): deterministic limits, real checks, one rule in one place, simplest setup that works, scripts beat narrow tools. **The workflow ships as the `appraisal-comps` plugin, with phase 1 (0.5.0) inside it.**
 
 What changed:
 - The rules load from the plugin at every session start; nothing to save or paste by hand after an update. The session start also runs migrations on a new version and checks once a day for an update; Claude asks before you install one. There's no one-step undo; a bad release is fixed by the next one.
-- A guard enforces protected files (`calibration.csv`, `settings/sites.json`, the plugin's own files), the data-host allowlist and the browser limits. It denies web search, and checks the desktop chat's own fetch tool (`mcp__workspace__web_fetch`) against the same data-host list as WebFetch.
-- Read-tier browser (its own logged-in profile; needs Node): Claude reads pages only on sites you enabled in `settings/sites.json`, with `origin` and `terms_checked_on` filled in by you. Edits to that file take effect in a new chat.
-- With no site enabled, the session start says so (`BROWSER_OFF no site enabled`), and Claude asks you to add the site you want read to `settings/sites.json` instead of reporting a failed browser.
-- The browser finds the selected folder on the desktop app: the app tells only the session-start hook which folder is selected, so the hook leaves the path in the chat's own plugin-data folder and the browser server waits up to 10 seconds for it.
+- A guard enforces protected files (`calibration.csv`, the plugin's own files), the data-host allowlist and the browser limits. It denies web search, and checks the desktop chat's own fetch tool (`mcp__workspace__web_fetch`) against the same data-host list as WebFetch.
+- Read-tier browser (its own logged-in profile; needs Node): Claude reads pages on the work sites built into the plugin (OneKey MLS, Zillow, AppraisalPort, Reggora, ValueConnect, DwellingBlocks, Aivre), all on from the start. There's nothing to set up: say "Open Zillow" and log in once in the browser window. Any other site stays closed to the browser. The maintainer adds a site in a release.
+- Plainer for the appraiser (desktop check C7). Claude talks to him in plain words without naming the plumbing, says session-start notes once, and starts each skill from everyday phrases ("Open Zillow", "Set up this folder"), listed in the README. Setup is two short messages.
 - New setup skill. `score_calibration.py` reads `shared/evals/` when given no file names.
 - The app installs the plugin read-only, and a plain copy keeps that. Setup and the new `tools/new_assignment.py` (used by comp-intake) copy file contents only, so the folder's files and each new assignment stay writable. The tests now pass from a read-only install too.
 - Maintainer: `release.py` publishes the plugin to the releases repo as a marketplace.
 - Docs: one home per topic. `docs/How to Update.md` is gone (Claude gives the install steps; the README's update loop covers the rest), and the network rule in `rules.md` is one bullet.
 
 Rule of Two and known limits:
-- The submit check matches the clicked element's text against a word list (Enter, or a click with no text, skips it). The limits are the browser's origin allowlist, the separate profile and the denied upload and script tools. The app also asks before every browser action.
+- The submit check matches the clicked element's text against a word list (Enter, or a click with no text, skips it). The limits are the guard's origin check on every address Claude opens, the separate profile and the denied upload and script tools. The app also asks before every browser action.
+- The work-site list limits the addresses Claude asks for, not where a page goes next. A listed site that redirects, or a link Claude clicks, can land on another address and the page loads (desktop check C9: `auth.dwellingblocks.com` redirected to `dwellingblocks.com`). Playwright's `--allowed-origins` is passed too, but its docs say it isn't a security boundary and doesn't affect redirects. The browser stays read-only there, and its pages are data.
 - The guard's Bash checks are text matching: it denies `curl`, `wget`, `scp`, `ssh`, `nc` and URLs to other hosts, but not a script that opens its own socket, globs, or symlinks.
 - If `python3` is missing, the hooks can't run and the guard fails open; setup's test run catches it.
-- Whether the browser's MCP server sees `CLAUDE_CODE_WORKSPACE_HOST_PATHS` is unconfirmed; `launch.py` logs which source found the folder.
 
 ## 0.5.0 (draft)
 

@@ -21,6 +21,12 @@ NYC = PRODUCT / "skills/comp-pool/scripts/nyc_sales.py"
 BRACKET = PRODUCT / "skills/comp-pool/scripts/bracket.py"
 SCORER = PRODUCT / "evals/score_calibration.py"
 GUARD = PRODUCT / "hooks/guard.py"
+# The installed version, from the plugin's own manifest, so a version bump
+# doesn't touch the tests. NEWER_VERSION and NEXT_NEWER_VERSION stand for
+# releases above it, for the update check.
+CURRENT_VERSION = json.loads((PRODUCT / ".claude-plugin/plugin.json").read_text())["version"]
+NEWER_VERSION = "99.0.0"
+NEXT_NEWER_VERSION = "99.0.1"
 BROWSER_TOOL_PREFIX = "mcp__plugin_appraisal-comps_browser__browser_"  # must match guard.BROWSER_TOOL_PREFIX
 results = []
 
@@ -28,11 +34,6 @@ results = []
 # when this test runs in a sandbox where ~/mnt/<the real workspace> exists. Set once,
 # by main(), before any test runs.
 SAFE_HOME: Path | None = None
-
-# The "good" sites.json written by test_browser, for test_guard to copy into its
-# own workspace. Set once, by test_browser, which main() always runs first.
-BROWSER_SITES_JSON: Path | None = None
-
 
 def check(name, ok, detail=""):
     results.append((name, bool(ok), detail))
@@ -42,7 +43,7 @@ def run(*args, cwd=None, env=None):
     child_env = dict(os.environ)
     child_env["HOME"] = str(SAFE_HOME)
     child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
-    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write the real session's handoff
+    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write into the real session's plugin data
     if env:
         child_env.update(env)
     p = subprocess.run([sys.executable, "-I", *map(str, args)], capture_output=True, text=True,
@@ -53,11 +54,11 @@ def run(*args, cwd=None, env=None):
 def run_streams(*args, cwd=None, env=None):
     """Like run(), but keeps stdout and stderr apart - for a check that cares
     which stream a line went to (launch.py's stdout is the MCP wire protocol;
-    nothing may ever print there, not even its own BROWSER_OFF message)."""
+    nothing may ever print there, not even its own error message)."""
     child_env = dict(os.environ)
     child_env["HOME"] = str(SAFE_HOME)
     child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
-    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write the real session's handoff
+    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write into the real session's plugin data
     if env:
         child_env.update(env)
     p = subprocess.run([sys.executable, "-I", *map(str, args)], capture_output=True, text=True,
@@ -77,7 +78,7 @@ def run_hook(script, payload, cwd=None, env=None):
     child_env = dict(os.environ)
     child_env["HOME"] = str(SAFE_HOME)
     child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
-    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write the real session's handoff
+    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write into the real session's plugin data
     if env:
         child_env.update(env)
     p = subprocess.run([sys.executable, "-I", str(script)], input=json.dumps(payload),
@@ -410,8 +411,9 @@ def test_workspace_several(tmp):
 def test_setup(tmp):
     target = tmp / "fresh"
     code, out = run(PRODUCT / "tools/setup_workspace.py", "--into", target)
-    check("setup: creates the workspace", code == 0 and (target / "settings/conventions.md").exists()
-          and (target / "settings/sites.json").exists(), out)
+    check("setup: creates the workspace", code == 0 and (target / "settings/conventions.md").exists(), out)
+    # The work sites are built into the plugin (browser/sites.py); his folder has no list.
+    check("setup: no settings/sites.json", not (target / "settings/sites.json").exists(), out)
     write(target / "settings/conventions.md", "his edits\n")
     code, out = run(PRODUCT / "tools/setup_workspace.py", "--into", target)
     check("setup: never overwrites", (target / "settings/conventions.md").read_text() == "his edits\n"
@@ -482,9 +484,9 @@ def test_session_start(tmp):
     context = session_context(out)
     check("session: rules loaded with the real plugin root",
           "${CLAUDE_PLUGIN_ROOT}" not in context and str(plugin) in context, context[:300])
-    check("session: first run says NEW_VERSION", "NEW_VERSION 0.6.0" in context)
+    check("session: first run says NEW_VERSION", f"NEW_VERSION {CURRENT_VERSION}" in context)
     state = json.loads((ws / "settings/plugin-state.json").read_text())
-    check("session: last_seen_version recorded", state["last_seen_version"] == "0.6.0")
+    check("session: last_seen_version recorded", state["last_seen_version"] == CURRENT_VERSION)
 
     write(plugin / "migrations/0_5_0_boom.py", "def migrate(root):\n    raise RuntimeError('boom')\n")
     write(ws / "settings/plugin-state.json", json.dumps({"last_seen_version": "0.4.0"}))
@@ -494,19 +496,19 @@ def test_session_start(tmp):
     check("session: failed migration retries next session", "MIGRATION_FAILED 0_5_0_boom" in session_context(out)
           and json.loads((ws / "settings/plugin-state.json").read_text())["last_seen_version"] == "0.4.0")
 
-    latest = write(tmp / "latest.json", json.dumps({"version": "0.7.0"}))
+    latest = write(tmp / "latest.json", json.dumps({"version": NEWER_VERSION}))
     fresh = make_workspace(tmp / "sp/ws2")
     env_ready = {"APPRAISAL_COMPS_TEST_LATEST": str(latest)}
     code, out = run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(fresh)}, cwd=fresh, env=env_ready)
-    check("update: newer version offered", "UPDATE_READY 0.7.0" in session_context(out), out[-300:])
+    check("update: newer version offered", f"UPDATE_READY {NEWER_VERSION}" in session_context(out), out[-300:])
     asg = fresh / "assignments/2026-01-05_1-test-st_2a"
     copy_writable(PRODUCT / "templates/assignment", asg)
-    write(asg / "events.csv", "timestamp,stage,event,version,note\n2026-01-05T10:00:00,1,start,0.6.0,\n")
-    latest.write_text(json.dumps({"version": "0.6.1"}))
-    write(fresh / "settings/plugin-state.json", json.dumps({"last_seen_version": "0.6.0"}))
+    write(asg / "events.csv", f"timestamp,stage,event,version,note\n2026-01-05T10:00:00,1,start,{CURRENT_VERSION},\n")
+    latest.write_text(json.dumps({"version": NEXT_NEWER_VERSION}))
+    write(fresh / "settings/plugin-state.json", json.dumps({"last_seen_version": CURRENT_VERSION}))
     code, out = run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(fresh)}, cwd=fresh, env=env_ready)
     check("update: open job warned, not blocked",
-          "UPDATE_READY 0.6.1" in session_context(out) and "finish it first" in session_context(out))
+          f"UPDATE_READY {NEXT_NEWER_VERSION}" in session_context(out) and "finish it first" in session_context(out))
     fails = make_workspace(tmp / "sp/ws3")
     first = session_context(run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(fails)}, cwd=fails, env=env)[1])
     second = session_context(run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(fails)}, cwd=fails, env=env)[1])
@@ -532,7 +534,7 @@ def test_session_start_host_paths(tmp):
     code, out = run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(empty)}, cwd=empty, env=env)
     context = session_context(out)
     check("session: host-path env finds the workspace when hook cwd has none",
-          "NEW_VERSION 0.6.0" in context and "no Appraisal Comps folder found" not in context, context[:300])
+          f"NEW_VERSION {CURRENT_VERSION}" in context and "no Appraisal Comps folder found" not in context, context[:300])
 
 
 RULES_MARKER = "Assistant to a licensed NYC residential appraiser"  # rules.md's first line of text
@@ -560,11 +562,11 @@ def test_session_start_resilience(tmp):
     write(ws / "settings/plugin-state.json", json.dumps({"last_seen_version": 5}))
     context = run_session(hook, ws, env)
     check("session: non-string last_seen_version still gives the rules",
-          RULES_MARKER in context and "NEW_VERSION 0.6.0" in context and "ERROR: session_start.py failed" not in context, context[-400:])
+          RULES_MARKER in context and f"NEW_VERSION {CURRENT_VERSION}" in context and "ERROR: session_start.py failed" not in context, context[-400:])
 
     ws = make_workspace(tmp / "sp/ws-empty-latest")
     write(ws / "settings/plugin-state.json", json.dumps({
-        "last_seen_version": "0.6.0", "last_check_date": date.today().isoformat(),
+        "last_seen_version": CURRENT_VERSION, "last_check_date": date.today().isoformat(),
         "latest_version": "", "last_check_result": "ok"}))
     context = run_session(hook, ws, env)
     check("session: empty cached latest_version still gives the rules",
@@ -578,38 +580,21 @@ def test_session_start_resilience(tmp):
           context[-400:])
 
 
-def test_session_browser_off(tmp):
-    """BROWSER_OFF whenever the browser can't start: a sites.json he must fix,
-    or no site enabled yet (so Claude asks him to add one, 2026-11-19)."""
+def test_session_ignores_old_sites_json(tmp):
+    """The work sites are built into the plugin, so the session start has
+    nothing to report about them: a settings/sites.json left in an older
+    folder, even a broken one, is ignored, and no handoff file is written."""
     hook = session_plugin(tmp)
     env = {"APPRAISAL_COMPS_TEST_LATEST": str(tmp / "missing.json")}
     ws = make_workspace(tmp / "sp/ws")
-    template_sites = (PRODUCT / "templates/workspace/settings/sites.json").read_text()
-
-    write(ws / "settings/sites.json", template_sites)
-    context = run_session(hook, ws, env)
-    browser_lines = [line for line in context.splitlines() if line.startswith("BROWSER_OFF")]
-    check("session: all-blank sites.json says no site is enabled",
-          browser_lines == ["BROWSER_OFF no site enabled in settings/sites.json"], browser_lines)
-
     write(ws / "settings/sites.json", '{"sites": [\n  {"name": "MLS",}\n]}')
     context = run_session(hook, ws, env)
-    check("session: invalid sites.json gives BROWSER_OFF with the line",
-          "\nBROWSER_OFF sites.json line 2" in context, context[-400:])
-
-    write(ws / "settings/sites.json", json.dumps({"sites": "not a list"}))
-    context = run_session(hook, ws, env)
-    check("session: wrongly shaped sites.json gives BROWSER_OFF", "\nBROWSER_OFF sites.json is not shaped" in context,
-          context[-400:])
-
-    write(ws / "settings/sites.json", json.dumps({"sites": [
-        {"name": "Zillow", "origin": "https://www.zillow.com", "access": "read", "terms_checked_on": "", "note": ""},
-        {"name": "MLS", "origin": "", "access": "read", "terms_checked_on": "", "note": ""}]}))
-    context = run_session(hook, ws, env)
-    browser_lines = [line for line in context.splitlines() if line.startswith("BROWSER_OFF ")]
-    check("session: site with an origin but no terms date named in BROWSER_OFF",
-          len(browser_lines) == 1 and "Zillow" in browser_lines[0] and "terms_checked_on" in browser_lines[0]
-          and "MLS" not in browser_lines[0], browser_lines)
+    check("session: no BROWSER_OFF line, even with a broken leftover sites.json",
+          "BROWSER_OFF" not in context, context[-400:])
+    plugin_data = tmp / "sp/plugin-data"
+    run_session(hook, ws, {**env, "CLAUDE_PLUGIN_DATA": str(plugin_data)})
+    check("session: no workspace handoff file is written", not (plugin_data / "workspace-path.txt").exists(),
+          sorted(plugin_data.glob("*")) if plugin_data.exists() else [])
 
 
 def test_scorer_workspace_defaults(tmp):
@@ -631,7 +616,6 @@ def test_scorer_workspace_defaults(tmp):
 def test_guard_final_fixes(tmp):
     """Final review I7 (browser filename writes) and I8 (WebSearch)."""
     ws = make_workspace(tmp / "ws")
-    shutil.copy(BROWSER_SITES_JSON, ws / "settings/sites.json")
     screenshot = BROWSER_TOOL_PREFIX + "take_screenshot"
     check("guard: browser filename absolute path denied",
           guard_action(ws, screenshot, {"filename": str(ws / "shared/evals/calibration.csv")}) == "deny")
@@ -639,14 +623,14 @@ def test_guard_final_fixes(tmp):
     check("guard: browser filename with .. denied", guard_action(ws, screenshot, {"filename": "..page.png"}) == "deny")
     check("guard: browser filename with a backslash denied",
           guard_action(ws, screenshot, {"filename": "a\\b.png"}) == "deny")
-    check("guard: browser filename sites.json denied (any case)",
-          guard_action(ws, BROWSER_TOOL_PREFIX + "snapshot", {"filename": "Sites.JSON"}) == "deny")
+    check("guard: browser filename calibration.csv denied (any case)",
+          guard_action(ws, BROWSER_TOOL_PREFIX + "snapshot", {"filename": "Calibration.CSV"}) == "deny")
     check("guard: browser filename not a string denied", guard_action(ws, screenshot, {"filename": 5}) == "deny")
     check("guard: screenshot with no filename allowed", guard_action(ws, screenshot, {}) == "allow")
     reason = guard_reason(ws, "WebSearch", {"query": "425 E 13th St sale"})
     check("guard: WebSearch denied, naming the allowed data sources",
           guard_action(ws, "WebSearch", {"query": "x"}) == "deny" and "data.cityofnewyork.us" in reason
-          and "a836-acris.nyc.gov" in reason and "settings/sites.json" in reason, reason)
+          and "a836-acris.nyc.gov" in reason and "work sites" in reason, reason)
     hooks = json.loads((PRODUCT / "hooks/hooks.json").read_text())
     matcher = hooks["hooks"]["PreToolUse"][0]["matcher"]
     check("guard: hooks.json matcher includes WebSearch", "WebSearch" in matcher.split("|"), matcher)
@@ -871,29 +855,22 @@ def test_guard(tmp):
     check("guard: deny reason names the file and says report the failing check instead",
           cal_path in reason and "report the failing check instead" in reason, reason)
 
-    # Fix round 1, R13: settings/sites.json is the appraiser's; Claude may read it
-    # (that's how browser-read checks a site is enabled) but never edit it - that
-    # would let Claude enable a site itself, including setting terms_checked_on.
-    check("guard: Write to settings/sites.json denied",
-          guard_action(ws, "Write", {"file_path": str(ws / "settings/sites.json")}) == "deny")
-    check("guard: Bash writing settings/Sites.json denied (case-insensitive)",
-          guard_action(ws, "Bash", {"command": "echo x > settings/Sites.json"}) == "deny")
-
     # Task 6: the browser's origin allowlist and the submit-like-click ask.
-    # BROWSER_SITES_JSON is written by test_browser, which main() runs first.
-    shutil.copy(BROWSER_SITES_JSON, ws / "settings/sites.json")
     prefix = BROWSER_TOOL_PREFIX
     nav = lambda url: guard_action(ws, prefix + "navigate", {"url": url})
     check("guard: enabled origin allowed", nav("https://www.onekeymls.com/listing/123") == "allow")
     check("guard: lookalike origins denied", all(nav(u) == "deny" for u in [
         "https://www.onekeymls.com.evil.io/", "http://www.onekeymls.com/", "https://www.onekeymls.com:8443/",
-        "https://www.zillow.com/"]))
+        "https://onekeymls.com/", "https://evil.example/"]))
     check("guard: upload denied", guard_action(ws, prefix + "file_upload", {"paths": ["/x"]}) == "deny")
     check("guard: submit click asks", guard_action(ws, prefix + "click", {"element": "Submit report", "ref": "e1"}) == "ask")
     check("guard: search click allowed", guard_action(ws, prefix + "click", {"element": "Search results tab", "ref": "e2"}) == "allow")
+    # A settings/sites.json left in an older folder is ignored: it can neither
+    # add a site nor, broken, switch the built-in ones off.
+    write(ws / "settings/sites.json", json.dumps({"sites": [{"name": "Evil", "origin": "https://evil.example"}]}))
+    check("guard: a leftover sites.json adds no site", nav("https://evil.example/") == "deny")
     write(ws / "settings/sites.json", "{broken")
-    check("guard: browser denied when sites.json broken", nav("https://www.onekeymls.com/") == "deny")
-    write(ws / "settings/sites.json", BROWSER_SITES_JSON.read_text())
+    check("guard: a broken leftover sites.json changes nothing", nav("https://www.zillow.com/") == "allow")
 
     # Fix round 1, item 1 (R12): a tabs call that carries a url gets the same
     # origin check as navigate; a tabs call with no url (list, switch, close by
@@ -934,103 +911,49 @@ def test_guard(tmp):
 
 
 def test_browser(tmp):
-    global BROWSER_SITES_JSON
     sys.path.insert(0, str(PRODUCT / "browser"))
     import sites as sites_module
-    good = write(tmp / "b/sites.json", json.dumps({"sites": [
-        {"name": "MLS", "origin": "https://www.onekeymls.com", "access": "read", "terms_checked_on": "2026-11-20", "note": ""},
-        {"name": "Zillow", "origin": "https://www.zillow.com", "access": "read", "terms_checked_on": "", "note": ""},
-        {"name": "Aivre", "origin": "https://app.aivre.com", "access": "fill", "terms_checked_on": "2026-11-20", "note": ""}]}))
-    BROWSER_SITES_JSON = good
-    enabled, problems = sites_module.load_sites(good)
-    check("sites: only the terms-checked read site enabled", [s.name for s in enabled] == ["MLS"], problems)
-    check("sites: fill tier refused", any("fill tier is not available" in p for p in problems), problems)
-    broken = write(tmp / "b/broken.json", '{"sites": [\n  {"name": "MLS",}\n]}')
-    enabled, problems = sites_module.load_sites(broken)
-    check("launch: invalid sites.json names line", enabled == [] and "line 2" in problems[0], problems)
+    origins = [origin for site in sites_module.SITES for origin in site.origins]
+    check("sites: the maintainer's seven work sites are built in",
+          [site.name for site in sites_module.SITES] == [
+              "OneKey MLS", "Zillow", "AppraisalPort", "Reggora", "ValueConnect", "DwellingBlocks", "Aivre"],
+          [site.name for site in sites_module.SITES])
+    check("sites: every site has at least one origin", all(site.origins for site in sites_module.SITES))
+    check("sites: every origin is already in origin_of()'s own shape (https, lowercase, no path)",
+          all(sites_module.origin_of(origin) == origin for origin in origins), origins)
+    check("sites: no origin is listed twice", len(set(origins)) == len(origins), origins)
+    check("sites: a site is a name and its origins",
+          list(vars(sites_module.SITES[0])) == ["name", "origins"], vars(sites_module.SITES[0]))
+    # Desktop check C9 (session 68dcd9ca): DwellingBlocks' Log in button goes to
+    # app.dwellingblocks.com, so a site can carry more than one origin.
+    dwelling_blocks = [site for site in sites_module.SITES if site.name == "DwellingBlocks"][0]
+    check("sites: DwellingBlocks includes its login origin",
+          "https://app.dwellingblocks.com" in dwelling_blocks.origins, dwelling_blocks.origins)
+
     import launch
-    command = launch.playwright_command(sites_module.load_sites(good)[0], tmp / "profile")
-    check("launch: allowed origins passed to the browser",
-          command[command.index("--allowed-origins") + 1] == "https://www.onekeymls.com", command)
-    ws = make_workspace(tmp / "b/ws")
-    code, out_stdout, out_stderr = run_streams(PRODUCT / "browser/launch.py", cwd=ws)
-    check("launch: no enabled site keeps the browser off", code == 1 and "BROWSER_OFF" in out_stderr,
-          out_stdout + out_stderr)
-    # Fix round 1, item 6: stdout is the MCP wire protocol - nothing may ever
-    # print there, not even the BROWSER_OFF message (that goes to stderr only).
-    check("launch: no enabled site prints nothing to stdout", out_stdout == "", repr(out_stdout))
-    # Final review I2 / ruling R20: stderr says which source found the workspace.
-    check("launch: stderr names the workspace source", "workspace source cwd" in out_stderr, out_stderr)
+    command = launch.playwright_command(tmp / "profile")
+    check("launch: every built-in origin passed to the browser",
+          command[command.index("--allowed-origins") + 1] == ";".join(origins), command)
+    # It needs no Appraisal Comps folder (nothing to read from it), so it never
+    # waits for one. With no npx on PATH it stops at once, on stderr only.
+    empty = tmp / "b/empty"
+    empty.mkdir(parents=True)
+    started = time.monotonic()
+    code, out_stdout, out_stderr = run_streams(PRODUCT / "browser/launch.py", cwd=empty, env={"PATH": str(empty)})
+    check("launch: starts without a workspace, and says when npx is missing",
+          code == 1 and "npx not found" in out_stderr and "workspace" not in out_stderr
+          and time.monotonic() - started < 5, out_stderr)
+    # Fix round 1, item 6: stdout is the MCP wire protocol - nothing may ever print there.
+    check("launch: prints nothing to stdout", out_stdout == "", repr(out_stdout))
 
-    # Guard denies every browser call when the workspace has no settings/sites.json at all
-    # (never written in this sub-test's own workspace).
-    noconf = make_workspace(tmp / "b/no-sites-ws")
     prefix = BROWSER_TOOL_PREFIX
-    check("guard: browser denied with no settings/sites.json at all",
-          guard_action(noconf, prefix + "navigate", {"url": "https://www.onekeymls.com/"}) == "deny")
-
-    # browser_evaluate is never on the allowed-tool list, regardless of sites.json.
-    shutil.copy(good, noconf / "settings/sites.json")
-    check("guard: browser_evaluate denied",
-          guard_action(noconf, prefix + "evaluate", {"script": "1+1"}) == "deny")
-
+    check("guard: every built-in site opens, with no workspace at all",
+          all(guard_action(empty, prefix + "navigate", {"url": origin + "/"}) == "allow" for origin in origins))
+    check("guard: browser_evaluate denied", guard_action(empty, prefix + "evaluate", {"script": "1+1"}) == "deny")
     # A fill_form naming a field "Accept order" must ask, same as a submit-like click.
     check("guard: fill_form with an 'Accept order' field asks",
-          guard_action(noconf, prefix + "fill_form",
+          guard_action(empty, prefix + "fill_form",
                        {"fields": [{"name": "Accept order", "value": "yes"}]}) == "ask")
-
-
-def test_browser_handoff(tmp):
-    """On the desktop app the browser server is told nothing about the
-    selected folder; only the SessionStart hook is. The hook leaves the path
-    in the session's CLAUDE_PLUGIN_DATA folder, and launch.py waits for it."""
-    plugin = tmp / "cache/appraisal-comps"
-    copy_plugin(plugin)
-    hook, launcher = plugin / "hooks/session_start.py", plugin / "browser/launch.py"
-    empty = tmp / "empty"
-    empty.mkdir()
-    ws = make_workspace(tmp / "Appraisal Comps")
-    shutil.copyfile(PRODUCT / "templates/workspace/settings/sites.json", ws / "settings/sites.json")
-    handoff_name = "workspace-path.txt"
-    no_update_check = {"APPRAISAL_COMPS_TEST_LATEST": str(tmp / "missing.json")}
-
-    data = tmp / "data-one"
-    run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(empty)}, cwd=empty,
-             env={**no_update_check, "CLAUDE_PLUGIN_DATA": str(data), "CLAUDE_CODE_WORKSPACE_HOST_PATHS": str(ws)})
-    handoff = data / handoff_name
-    check("handoff: hook writes the workspace path",
-          handoff.is_file() and handoff.read_text().strip() == str(ws.resolve()))
-
-    data_none = tmp / "data-none"
-    run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(empty)}, cwd=empty,
-             env={**no_update_check, "CLAUDE_PLUGIN_DATA": str(data_none)})
-    check("handoff: hook writes nothing when it finds no workspace", not (data_none / handoff_name).exists())
-
-    # The browser server starts before the hook: the path shows up while it waits.
-    data_late = tmp / "data-late"
-    data_late.mkdir()
-    child_env = dict(os.environ, HOME=str(SAFE_HOME), CLAUDE_PLUGIN_DATA=str(data_late))
-    child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
-    server = subprocess.Popen([sys.executable, "-I", str(launcher)], cwd=empty, env=child_env,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time.sleep(0.5)
-    write(data_late / handoff_name, str(ws) + "\n")
-    out_stdout, out_stderr = server.communicate(timeout=30)
-    check("handoff: launch.py finds the workspace written after it started",
-          "workspace source handoff" in out_stderr and "no site enabled" in out_stderr, out_stderr)
-    check("handoff: launch.py prints nothing to stdout", out_stdout == "", repr(out_stdout))
-
-    short_wait = {"CLAUDE_PLUGIN_DATA": str(tmp / "data-never"), "APPRAISAL_COMPS_HANDOFF_WAIT": "0.3"}
-    code, out_stdout, out_stderr = run_streams(launcher, cwd=empty, env=short_wait)
-    check("handoff: no path from the hook keeps the browser off, with the reason",
-          code == 1 and "BROWSER_OFF" in out_stderr and "session hook" in out_stderr, out_stderr)
-
-    data_bad = tmp / "data-bad"
-    write(data_bad / handoff_name, str(empty) + "\n")
-    code, out_stdout, out_stderr = run_streams(
-        launcher, cwd=empty, env={"CLAUDE_PLUGIN_DATA": str(data_bad), "APPRAISAL_COMPS_HANDOFF_WAIT": "0.3"})
-    check("handoff: a path that isn't a workspace is refused",
-          code == 1 and "BROWSER_OFF" in out_stderr and "workspace source handoff" not in out_stderr, out_stderr)
 
 
 def test_guard_missing_workspace_module(tmp):
@@ -1058,9 +981,9 @@ def main():
                    test_workspace_mnt, test_workspace_several, test_setup, test_read_only_install,
                    test_session_start,
                    test_session_start_host_paths, test_session_start_resilience,
-                   test_session_browser_off,
+                   test_session_ignores_old_sites_json,
                    test_scorer_workspace_defaults, test_skill_paths, test_ledger_and_export, test_browser,
-                   test_guard, test_guard_final_fixes, test_browser_handoff,
+                   test_guard, test_guard_final_fixes,
                    test_guard_missing_workspace_module):
             try:
                 if fn in (test_nyc_sales, test_skill_paths):

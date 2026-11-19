@@ -47,13 +47,13 @@ def _deny_and_exit(reason: str) -> None:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 try:
-    from workspace import plugin_root, workspace_candidates  # noqa: E402
+    from workspace import plugin_root  # noqa: E402
 except Exception as _import_error:  # tools/workspace.py missing or broken: fail closed
     _deny_and_exit(f"guard failed to load workspace.py: {_import_error}")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "browser"))
 try:
-    from sites import Site, load_sites, origin_of  # noqa: E402
+    from sites import origin_of, site_origins  # noqa: E402
 except Exception as _import_error:  # browser/sites.py missing or broken: fail closed
     _deny_and_exit(f"guard failed to load sites.py: {_import_error}")
 
@@ -71,13 +71,9 @@ NETWORK_COMMAND_WORDS = ("curl", "wget", "scp", "ssh", "nc", "ftp", "sftp")
 PLUGIN_PATH_SEGMENTS = ("/.claude/plugins/", "/.local-plugins/", "claude-hostloop-plugins/")
 
 CALIBRATION_FILENAME = "calibration.csv"
-SITES_FILENAME = "sites.json"
-SITES_JSON_REASON = ("settings/sites.json is the appraiser's; he edits it himself. "
-                      "Tell him what to change instead.")
-
 WEBSEARCH_REASON = ("web search is not allowed in this project. Network use is read-only queries to "
                     "NYC Open Data (data.cityofnewyork.us) and ACRIS (a836-acris.nyc.gov), and the "
-                    "browser on the sites enabled in settings/sites.json.")
+                    "browser on the plugin's work sites.")
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 BASH_TOOLS = ("Bash", "mcp__workspace__bash")
@@ -100,7 +96,9 @@ BROWSER_ALLOWED_TOOLS = (
 # A click or fill_form naming one of these, as a whole word, looks like it
 # changes something on the site rather than just reading it: ask instead of
 # allowing. This is a speed bump, not a limit - the real limits are the
-# origin allowlist and the tools left off BROWSER_ALLOWED_TOOLS.
+# origin check on every address Claude opens and the tools left off
+# BROWSER_ALLOWED_TOOLS. (A page can still redirect to another origin:
+# Playwright's --allowed-origins doesn't stop redirects.)
 BROWSER_ASK_WORDS = ("submit", "send", "deliver", "accept", "decline", "sign", "upload",
                      "pay", "delete", "complete", "assign", "finalize")
 
@@ -136,14 +134,6 @@ def _is_calibration_csv(path_str: str) -> bool:
     return bool(parts) and parts[-1].casefold() == CALIBRATION_FILENAME.casefold()
 
 
-def _is_sites_json(path_str: str) -> bool:
-    """True when path_str's basename casefolds to sites.json (R13:
-    settings/sites.json is the appraiser's; only he sets terms_checked_on,
-    so Claude may read it but never edit it, wherever it is named)."""
-    parts = _lexical_parts(path_str)
-    return bool(parts) and parts[-1].casefold() == SITES_FILENAME.casefold()
-
-
 def _is_plugin_path(path_str: str) -> bool:
     """True when path_str names a file inside some plugin install: this
     guard's own plugin root, or a path carrying a known plugin-cache
@@ -169,8 +159,6 @@ def _decide_edit(tool_name: str, tool_input: dict[str, object]) -> Decision:
         return Decision("deny", MALFORMED_INPUT_REASON)
     if _is_calibration_csv(value):
         return Decision("deny", f"{value} is the appraiser's calibration answer key; {REPORT_INSTEAD}")
-    if _is_sites_json(value):
-        return Decision("deny", SITES_JSON_REASON)
     if _is_plugin_path(value):
         return Decision("deny", f"{value} is inside the plugin's own files; {REPORT_INSTEAD}")
     return ALLOW
@@ -219,8 +207,6 @@ def _decide_bash(tool_input: dict[str, object]) -> Decision:
         return Decision("deny", MALFORMED_INPUT_REASON)
     if CALIBRATION_FILENAME in command.casefold():
         return Decision("deny", f"command names {CALIBRATION_FILENAME}; {REPORT_INSTEAD}")
-    if SITES_FILENAME in command.casefold():
-        return Decision("deny", SITES_JSON_REASON)
     word_match = NETWORK_WORD_RE.search(command)
     if word_match is not None:
         return Decision("deny", f"command uses {word_match.group()}, which is not allowed")
@@ -257,7 +243,7 @@ def _browser_ask_texts(browser_tool: str, tool_input: dict[str, object]) -> list
     return texts
 
 
-def _decide_browser_url(url_value: object, sites: list[Site]) -> Decision:
+def _decide_browser_url(url_value: object) -> Decision:
     """Shared by navigate and by a tabs call that carries a url (R12: a new
     tab can load a page exactly like navigate does, so it needs the same
     origin check - a tabs call with no url, e.g. list/switch/close, is left
@@ -265,10 +251,9 @@ def _decide_browser_url(url_value: object, sites: list[Site]) -> Decision:
     if not isinstance(url_value, str) or not url_value:
         return Decision("deny", MALFORMED_INPUT_REASON)
     origin = origin_of(url_value)
-    enabled_origins = {origin_of(site.origin) for site in sites}
-    if origin and origin in enabled_origins:
+    if origin and origin in site_origins():
         return ALLOW
-    return Decision("deny", f"{origin or url_value} is not an enabled origin in settings/sites.json")
+    return Decision("deny", f"{origin or url_value} is not one of the plugin's work sites")
 
 
 def _decide_browser_filename(filename: object) -> Decision:
@@ -280,26 +265,13 @@ def _decide_browser_filename(filename: object) -> Decision:
         return Decision("deny", MALFORMED_INPUT_REASON)
     if "/" in filename or "\\" in filename or ".." in filename:
         return Decision("deny", f"browser filename {filename!r} must be a plain file name, like page.png")
-    protected_names = (CALIBRATION_FILENAME.casefold(), SITES_FILENAME.casefold())
-    if filename.casefold() in protected_names:
+    if filename.casefold() == CALIBRATION_FILENAME.casefold():
         return Decision("deny", f"browser filename {filename!r} is a protected file name")
     return ALLOW
 
 
-def _decide_browser(tool_name: str, tool_input: dict[str, object], workspace: Path | None) -> Decision:
+def _decide_browser(tool_name: str, tool_input: dict[str, object]) -> Decision:
     browser_tool = tool_name[len(BROWSER_TOOL_PREFIX):]
-    if workspace is None:
-        return Decision("deny", "no workspace found; the browser is denied")
-    sites, problems = load_sites(workspace / "settings" / "sites.json")
-    if not sites:
-        # No enabled site, whether because settings/sites.json is missing,
-        # invalid JSON, the wrong shape, or every site in it is disabled
-        # (blank origin, no terms date, or fill tier): deny everything,
-        # naming the problem when there is one to name. Per-site problems
-        # on an otherwise-fine file (the common case: one site refused,
-        # others enabled) never reach here, because sites is non-empty.
-        reason = "; ".join(problems) if problems else "no site is enabled in settings/sites.json"
-        return Decision("deny", reason)
     if browser_tool not in BROWSER_ALLOWED_TOOLS:
         return Decision("deny", f"browser_{browser_tool} is not a read-tier tool")
     if "filename" in tool_input:
@@ -307,9 +279,9 @@ def _decide_browser(tool_name: str, tool_input: dict[str, object], workspace: Pa
         if filename_decision.action != "allow":
             return filename_decision
     if browser_tool == "navigate":
-        return _decide_browser_url(tool_input.get("url"), sites)
+        return _decide_browser_url(tool_input.get("url"))
     if browser_tool == "tabs" and "url" in tool_input:
-        return _decide_browser_url(tool_input.get("url"), sites)
+        return _decide_browser_url(tool_input.get("url"))
     if browser_tool in ("click", "fill_form"):
         texts = _browser_ask_texts(browser_tool, tool_input)
         if BROWSER_ASK_WORD_RE.search(" ".join(texts)):
@@ -325,7 +297,7 @@ def _decide_browser(tool_name: str, tool_input: dict[str, object], workspace: Pa
     return ALLOW
 
 
-def decide(tool_name: str, tool_input: dict[str, object], workspace: Path | None) -> Decision:
+def decide(tool_name: str, tool_input: dict[str, object]) -> Decision:
     """Pure: no I/O, no filesystem writes."""
     if tool_name in EDIT_TOOLS:
         return _decide_edit(tool_name, tool_input)
@@ -336,15 +308,8 @@ def decide(tool_name: str, tool_input: dict[str, object], workspace: Path | None
     if tool_name in BASH_TOOLS:
         return _decide_bash(tool_input)
     if tool_name.startswith(BROWSER_TOOL_PREFIX):
-        return _decide_browser(tool_name, tool_input, workspace)
+        return _decide_browser(tool_name, tool_input)
     return ALLOW
-
-
-def _workspace_from_payload(payload: dict[str, object]) -> Path | None:
-    cwd_value = payload.get("cwd")
-    start = Path(cwd_value) if isinstance(cwd_value, str) and cwd_value else Path.cwd()
-    candidates = workspace_candidates(start)
-    return candidates[0] if len(candidates) == 1 else None
 
 
 def _parse_payload(raw: str) -> object:
@@ -358,8 +323,8 @@ def _parse_payload(raw: str) -> object:
 
 
 def decide_from_raw(raw: str) -> Decision:
-    """Validate the hook's raw stdin into a tool_name/tool_input pair, find
-    the workspace, and call decide(). Any malformed shape denies with
+    """Validate the hook's raw stdin into a tool_name/tool_input pair and
+    call decide(). Any malformed shape denies with
     MALFORMED_INPUT_REASON, before decide() ever sees it."""
     payload = _parse_payload(raw)
     if not isinstance(payload, dict):
@@ -370,8 +335,7 @@ def decide_from_raw(raw: str) -> Decision:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return Decision("deny", MALFORMED_INPUT_REASON)
-    workspace = _workspace_from_payload(payload)
-    return decide(tool_name, tool_input, workspace)
+    return decide(tool_name, tool_input)
 
 
 def _hook_output(decision: Decision) -> str | None:

@@ -24,7 +24,7 @@ python3 -I ${CLAUDE_SKILL_DIR}/scripts/nyc_sales.py sales --bbl <BBL> --since <Y
 
 - Condo units and houses: run `nyc_sales.py acris --bbl <unit or house BBL> --expect-price <DOF price> --expect-date <DOF date>` on every condo or house candidate before you propose it (house sales are deeds too), and note the ACRIS link. The script prints `DEED CHECK:`. Anything other than MATCH (DATE_DIFF, MISMATCH, ZERO_DEED, PARTIAL) is flagged to the appraiser and logged as `ACRIS_MISMATCH`, not dropped silently. Don't compare amounts by eye.
 - Co-ops: share sales are not deeds in ACRIS. DOF sales (categories 09/10) are the public record. Say so in the source column. Bed/bath/size for co-ops must come from the appraiser's own sources or materials they upload.
-- Asking prices and listing pages are context only, never the sale price. The appraiser opens StreetEasy, Zillow or Comps USA in their own session, unless it's enabled in `settings/sites.json` (read it with the `browser-read` skill). Do not scrape them.
+- Asking prices and listing pages are context only, never the sale price. Zillow is a work site (read it with the `browser-read` skill); the appraiser opens StreetEasy or Comps USA in their own session. Do not scrape them.
 
 ## 3. Score and rank
 

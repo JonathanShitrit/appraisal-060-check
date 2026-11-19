@@ -1,25 +1,23 @@
 ---
 name: browser-read
-description: Read a property, sale or order page in the appraiser's logged-in browser on a site enabled in settings/sites.json.
+description: Open and read a work site (OneKey MLS, Zillow, AppraisalPort, Reggora, ValueConnect, DwellingBlocks, Aivre) in the appraiser's logged-in browser. Use when he names one of those sites, pastes a listing or order link from one, or asks to open or check one.
 ---
 
 # Browser (read tier)
 
-Read only. The browser's own origin allowlist and the guard's tool list enforce that; this skill is about what to do with a page once it opens.
+Read only. The guard's site and tool checks enforce that; this skill is about what to do with a page once it opens.
 
-## Before
+## Sites
 
-Read `settings/sites.json` (with the Read tool only - it is the appraiser's file, and the guard refuses any Edit, Write or Bash command that names it): the site needs a filled `origin` and a `terms_checked_on` date, with `access` set to `read`. If it isn't enabled, tell the appraiser which field is missing (origin, terms date, or wrong access tier) and stop. He enables a site himself: he checks that its terms allow a logged-in read-only assistant, then fills in its `origin` (like `https://www.onekeymls.com`) and `terms_checked_on` (the date he checked). Never edit `settings/sites.json` yourself, even to fill in a field he asked for; tell him what to type and let him make the edit. Edits to `settings/sites.json` take effect in a new chat.
-
-No browser tools in this chat → check `settings/sites.json` (see the session's `BROWSER_OFF` line), that Node is installed, then a new chat.
+Every site in the description is on; there's nothing to turn on or set up. Any other site is closed to the browser: he opens it himself, and you use only what he pastes or uploads. No browser tools in this chat → check that Node is installed, then a new chat.
 
 The app asks him before each browser action ("Allow once" / "Allow for this task"). That's expected; wait for his answer rather than treating it as a failure.
 
 ## Logging in
 
-Once he has enabled the site and started a new chat: when a login page shows, ask him to log in in the browser window himself and say when he's done. Never type a password.
+When a login page shows, ask him to log in in the browser window himself and say when he's done. Never type a password. The browser keeps him logged in for next time.
 
-If his site's sign-in page redirects to a different web address and the browser blocks it, stop and tell him which address was blocked. The maintainer decides whether to add it to `settings/sites.json`.
+If his site's sign-in page redirects to a different web address and the browser blocks it, stop and tell him which address was blocked, for the maintainer to add to the plugin's site list.
 
 ## Reading
 

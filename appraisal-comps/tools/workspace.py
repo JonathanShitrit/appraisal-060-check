@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -114,57 +113,6 @@ def require_workspace(start: Path) -> Path:
               "Open the one you want and run again from inside it.", file=sys.stderr)
         raise SystemExit(2)
     return candidates[0]
-
-
-# The workspace handoff. On the desktop app, the SessionStart hook is told
-# which folder the appraiser selected (CLAUDE_CODE_WORKSPACE_HOST_PATHS), but
-# the browser's MCP server is not, and it starts before the hook. Both get
-# the same CLAUDE_PLUGIN_DATA folder, which the app makes new for every chat
-# (seen in the 2026-11-19 desktop check). So the hook writes the path there,
-# and launch.py waits for it.
-HANDOFF_FILE_NAME = "workspace-path.txt"
-HANDOFF_WAIT_SECONDS = 10.0
-HANDOFF_POLL_SECONDS = 0.1
-
-
-def _handoff_path() -> Path | None:
-    """The handoff file in this session's CLAUDE_PLUGIN_DATA, or None if that's unset."""
-    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
-    if not plugin_data:
-        return None
-    return Path(plugin_data) / HANDOFF_FILE_NAME
-
-
-def write_workspace_handoff(workspace: Path) -> None:
-    """Leave the workspace path for this session's browser server. Never raises:
-    a failure here only keeps the browser off, and must not stop the session start."""
-    handoff = _handoff_path()
-    if handoff is None:
-        return
-    try:
-        handoff.parent.mkdir(parents=True, exist_ok=True)
-        partial = handoff.with_name(handoff.name + ".partial")
-        partial.write_text(str(workspace.resolve()) + "\n")
-        os.replace(partial, handoff)  # atomic: the reader never sees half a path
-    except OSError:
-        return
-
-
-def wait_for_workspace_handoff(wait_seconds: float) -> Path | None:
-    """Wait up to wait_seconds for the hook's handoff file. Return the workspace
-    it names, or None if no file came or it doesn't name a workspace."""
-    handoff = _handoff_path()
-    if handoff is None:
-        return None
-    deadline = time.monotonic() + wait_seconds
-    while not handoff.is_file():
-        if time.monotonic() >= deadline:
-            return None
-        time.sleep(HANDOFF_POLL_SECONDS)
-    folder = Path(handoff.read_text().strip())
-    if not _is_workspace(folder):
-        return None
-    return folder
 
 
 def plugin_root() -> Path:
