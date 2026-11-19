@@ -1,0 +1,9 @@
+{"sites": [
+  {"name": "OneKey MLS", "origin": "", "access": "read", "terms_checked_on": "", "note": "sales history, photos after close (Q11)"},
+  {"name": "Zillow", "origin": "", "access": "read", "terms_checked_on": "", "note": "fallback listing data (Q11, Q17)"},
+  {"name": "AppraisalPort", "origin": "", "access": "read", "terms_checked_on": "", "note": "ordering platform: read orders and due dates (Q23, Q26)"},
+  {"name": "Reggora", "origin": "", "access": "read", "terms_checked_on": "", "note": "ordering platform: read orders and due dates (Q23, Q26)"},
+  {"name": "ValueConnect", "origin": "", "access": "read", "terms_checked_on": "", "note": "ordering platform: read orders and due dates (Q23, Q26)"},
+  {"name": "dwellingblogs", "origin": "", "access": "read", "terms_checked_on": "", "note": "ordering platform: read orders and due dates (Q23, Q26)"},
+  {"name": "Aivre", "origin": "", "access": "read", "terms_checked_on": "", "note": "report software; read only in this version, filling forms needs its own spec (Q13)"}
+]}
