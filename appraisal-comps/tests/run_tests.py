@@ -579,7 +579,8 @@ def test_session_start_resilience(tmp):
 
 
 def test_session_browser_off(tmp):
-    """Final review I2 / ruling R18: BROWSER_OFF only for a sites.json he must fix."""
+    """BROWSER_OFF whenever the browser can't start: a sites.json he must fix,
+    or no site enabled yet (so Claude asks him to add one, 2026-11-19)."""
     hook = session_plugin(tmp)
     env = {"APPRAISAL_COMPS_TEST_LATEST": str(tmp / "missing.json")}
     ws = make_workspace(tmp / "sp/ws")
@@ -587,7 +588,9 @@ def test_session_browser_off(tmp):
 
     write(ws / "settings/sites.json", template_sites)
     context = run_session(hook, ws, env)
-    check("session: all-blank sites.json says no BROWSER_OFF", "\nBROWSER_OFF" not in context, context[-400:])
+    browser_lines = [line for line in context.splitlines() if line.startswith("BROWSER_OFF")]
+    check("session: all-blank sites.json says no site is enabled",
+          browser_lines == ["BROWSER_OFF no site enabled in settings/sites.json"], browser_lines)
 
     write(ws / "settings/sites.json", '{"sites": [\n  {"name": "MLS",}\n]}')
     context = run_session(hook, ws, env)

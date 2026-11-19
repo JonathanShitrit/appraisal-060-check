@@ -40,6 +40,8 @@ from update_check import DEFAULT_SOURCE, INSTALL_HOW, failure_reason, fetch_late
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "browser"))
 from sites import load_sites  # noqa: E402
 
+NO_SITE_ENABLED = "no site enabled in settings/sites.json"  # same words as browser/launch.py
+
 MIGRATION_FAILED_FOLLOW_UP = (
     "Start no assignment work. Tell him. If an assignment is open, log "
     "`ledger.py error --assignment <it> --stage <its stage> --code UPDATE_FAILED`; "
@@ -265,18 +267,20 @@ def browser_off_line(workspace: Path) -> str:
     """The BROWSER_OFF line for settings/sites.json, or "" for none (R18).
 
     Reported when the file fails to load (invalid JSON, with its line and
-    column, or the wrong shape), or when a site he has started to fill in
-    (a non-blank origin) is still disabled. A missing file, or every
-    origin blank (a fresh install), says nothing: he hasn't enabled
-    anything yet, and a warning every session would be noise.
+    column, or the wrong shape), when a site he has started to fill in
+    (a non-blank origin) is still disabled, or when no site is enabled at
+    all (a fresh install), so Claude asks him to add the site he needs
+    instead of calling the browser broken. A missing file says nothing.
     """
     sites_path = workspace / "settings" / "sites.json"
     if not sites_path.exists():
         return ""
-    _enabled_sites, problems = load_sites(sites_path)
-    if not problems:
-        return ""
-    return "BROWSER_OFF " + "; ".join(problems)
+    enabled_sites, problems = load_sites(sites_path)
+    if problems:
+        return "BROWSER_OFF " + "; ".join(problems)
+    if not enabled_sites:
+        return "BROWSER_OFF " + NO_SITE_ENABLED
+    return ""
 
 
 def workspace_lines(start: Path) -> list[str]:

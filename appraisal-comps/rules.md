@@ -49,7 +49,7 @@ Rewrite `progress.md` at the end of every stage. Append to `log.md`; never edit 
 | `CHECK_FAILED` | Tell him in one line; work carries on. |
 | `MIGRATION_FAILED` | Show the line. Start no assignment work. |
 | `NO_WORKSPACE` | Ask him to open the Appraisal Comps folder or run setup. |
-| `BROWSER_OFF` | Tell him in one line what to fix in `settings/sites.json`, then start a new chat; carry on without the browser. |
+| `BROWSER_OFF` | Never call the browser broken or failed. No site enabled: ask him to add the site he wants read to `settings/sites.json` himself (its `origin`, and `terms_checked_on` once he's checked its terms allow a logged-in read-only assistant), then start a new chat. Otherwise tell him in one line what to fix there. Carry on without the browser. |
 
 Updates are offered only at session start.
 
