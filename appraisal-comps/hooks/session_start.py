@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-from workspace import plugin_root, plugin_version, workspace_candidates  # noqa: E402
+from workspace import plugin_root, plugin_version, workspace_candidates, write_workspace_handoff  # noqa: E402
 from migrations import MigrationError, parse_version, run_pending  # noqa: E402
 from update_check import DEFAULT_SOURCE, INSTALL_HOW, failure_reason, fetch_latest, open_jobs  # noqa: E402
 
@@ -288,6 +288,7 @@ def workspace_lines(start: Path) -> list[str]:
         if len(candidates) != 1:
             return [no_workspace_line(candidates)]
         workspace = candidates[0]
+        write_workspace_handoff(workspace)  # first, so the browser server isn't kept waiting
         lines.extend(status_lines(workspace))
         browser_line = browser_off_line(workspace)
         if browser_line:

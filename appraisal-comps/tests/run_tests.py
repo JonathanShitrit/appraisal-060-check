@@ -12,7 +12,7 @@ script, or report the failure to the maintainer.
 """
 from __future__ import annotations
 
-import csv, importlib.util, json, os, shutil, stat, subprocess, sys, tempfile
+import csv, importlib.util, json, os, shutil, stat, subprocess, sys, tempfile, time
 from pathlib import Path
 
 PRODUCT = Path(__file__).resolve().parents[1]
@@ -42,6 +42,7 @@ def run(*args, cwd=None, env=None):
     child_env = dict(os.environ)
     child_env["HOME"] = str(SAFE_HOME)
     child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
+    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write the real session's handoff
     if env:
         child_env.update(env)
     p = subprocess.run([sys.executable, "-I", *map(str, args)], capture_output=True, text=True,
@@ -56,6 +57,7 @@ def run_streams(*args, cwd=None, env=None):
     child_env = dict(os.environ)
     child_env["HOME"] = str(SAFE_HOME)
     child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
+    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write the real session's handoff
     if env:
         child_env.update(env)
     p = subprocess.run([sys.executable, "-I", *map(str, args)], capture_output=True, text=True,
@@ -75,6 +77,7 @@ def run_hook(script, payload, cwd=None, env=None):
     child_env = dict(os.environ)
     child_env["HOME"] = str(SAFE_HOME)
     child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
+    child_env.pop("CLAUDE_PLUGIN_DATA", None)  # never write the real session's handoff
     if env:
         child_env.update(env)
     p = subprocess.run([sys.executable, "-I", str(script)], input=json.dumps(payload),
@@ -965,6 +968,59 @@ def test_browser(tmp):
                        {"fields": [{"name": "Accept order", "value": "yes"}]}) == "ask")
 
 
+def test_browser_handoff(tmp):
+    """On the desktop app the browser server is told nothing about the
+    selected folder; only the SessionStart hook is. The hook leaves the path
+    in the session's CLAUDE_PLUGIN_DATA folder, and launch.py waits for it."""
+    plugin = tmp / "cache/appraisal-comps"
+    copy_plugin(plugin)
+    hook, launcher = plugin / "hooks/session_start.py", plugin / "browser/launch.py"
+    empty = tmp / "empty"
+    empty.mkdir()
+    ws = make_workspace(tmp / "Appraisal Comps")
+    shutil.copyfile(PRODUCT / "templates/workspace/settings/sites.json", ws / "settings/sites.json")
+    handoff_name = "workspace-path.txt"
+    no_update_check = {"APPRAISAL_COMPS_TEST_LATEST": str(tmp / "missing.json")}
+
+    data = tmp / "data-one"
+    run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(empty)}, cwd=empty,
+             env={**no_update_check, "CLAUDE_PLUGIN_DATA": str(data), "CLAUDE_CODE_WORKSPACE_HOST_PATHS": str(ws)})
+    handoff = data / handoff_name
+    check("handoff: hook writes the workspace path",
+          handoff.is_file() and handoff.read_text().strip() == str(ws.resolve()))
+
+    data_none = tmp / "data-none"
+    run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(empty)}, cwd=empty,
+             env={**no_update_check, "CLAUDE_PLUGIN_DATA": str(data_none)})
+    check("handoff: hook writes nothing when it finds no workspace", not (data_none / handoff_name).exists())
+
+    # The browser server starts before the hook: the path shows up while it waits.
+    data_late = tmp / "data-late"
+    data_late.mkdir()
+    child_env = dict(os.environ, HOME=str(SAFE_HOME), CLAUDE_PLUGIN_DATA=str(data_late))
+    child_env.pop("CLAUDE_CODE_WORKSPACE_HOST_PATHS", None)
+    server = subprocess.Popen([sys.executable, "-I", str(launcher)], cwd=empty, env=child_env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(0.5)
+    write(data_late / handoff_name, str(ws) + "\n")
+    out_stdout, out_stderr = server.communicate(timeout=30)
+    check("handoff: launch.py finds the workspace written after it started",
+          "workspace source handoff" in out_stderr and "no site enabled" in out_stderr, out_stderr)
+    check("handoff: launch.py prints nothing to stdout", out_stdout == "", repr(out_stdout))
+
+    short_wait = {"CLAUDE_PLUGIN_DATA": str(tmp / "data-never"), "APPRAISAL_COMPS_HANDOFF_WAIT": "0.3"}
+    code, out_stdout, out_stderr = run_streams(launcher, cwd=empty, env=short_wait)
+    check("handoff: no path from the hook keeps the browser off, with the reason",
+          code == 1 and "BROWSER_OFF" in out_stderr and "session hook" in out_stderr, out_stderr)
+
+    data_bad = tmp / "data-bad"
+    write(data_bad / handoff_name, str(empty) + "\n")
+    code, out_stdout, out_stderr = run_streams(
+        launcher, cwd=empty, env={"CLAUDE_PLUGIN_DATA": str(data_bad), "APPRAISAL_COMPS_HANDOFF_WAIT": "0.3"})
+    check("handoff: a path that isn't a workspace is refused",
+          code == 1 and "BROWSER_OFF" in out_stderr and "workspace source handoff" not in out_stderr, out_stderr)
+
+
 def test_guard_missing_workspace_module(tmp):
     """If tools/workspace.py is missing or broken (an interrupted or
     partial install), the guard must still deny - never crash and let
@@ -992,7 +1048,8 @@ def main():
                    test_session_start_host_paths, test_session_start_resilience,
                    test_session_browser_off,
                    test_scorer_workspace_defaults, test_skill_paths, test_ledger_and_export, test_browser,
-                   test_guard, test_guard_final_fixes, test_guard_missing_workspace_module):
+                   test_guard, test_guard_final_fixes, test_browser_handoff,
+                   test_guard_missing_workspace_module):
             try:
                 if fn in (test_nyc_sales, test_skill_paths):
                     fn()

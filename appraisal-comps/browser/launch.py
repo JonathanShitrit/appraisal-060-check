@@ -6,7 +6,10 @@ pinned Playwright MCP server restricted to the sites enabled there.
 
 stdout is the MCP channel: this script must never print to it. It writes
 to stderr which source found the workspace (cwd chain,
-CLAUDE_CODE_WORKSPACE_HOST_PATHS, or ~/mnt). When no site is enabled it writes BROWSER_OFF to stderr and exits 1 instead of
+CLAUDE_CODE_WORKSPACE_HOST_PATHS, ~/mnt, or the SessionStart hook's handoff:
+on the desktop app this server is told nothing about the selected folder and
+starts before the hook, so it waits for the path the hook leaves in
+CLAUDE_PLUGIN_DATA). When no site is enabled it writes BROWSER_OFF to stderr and exits 1 instead of
 starting a browser with no sites allowed (Design Principles, "Trust": an
 origin allowed by default, or by a malformed sites.json, is an anti-goal).
 
@@ -20,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-from workspace import search_workspaces  # noqa: E402
+from workspace import HANDOFF_WAIT_SECONDS, search_workspaces, wait_for_workspace_handoff  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sites import Site, load_sites  # noqa: E402
@@ -41,13 +44,31 @@ def playwright_command(sites: list[Site], profile_dir: Path) -> list[str]:
     ]
 
 
+def handoff_wait_seconds() -> float:
+    """How long to wait for the hook's handoff. Tests shorten it with
+    APPRAISAL_COMPS_HANDOFF_WAIT."""
+    override = os.environ.get("APPRAISAL_COMPS_HANDOFF_WAIT", "")
+    if override:
+        return float(override)
+    return HANDOFF_WAIT_SECONDS
+
+
 def main() -> None:
     search = search_workspaces(Path.cwd())
     candidates = search.candidates
-    # R20: say which source found the workspace, so the desktop check can see
-    # whether the MCP server's environment carries CLAUDE_CODE_WORKSPACE_HOST_PATHS.
+    source = search.source
+    if source == "none":
+        handoff_workspace = wait_for_workspace_handoff(handoff_wait_seconds())
+        if handoff_workspace is None:
+            print("launch.py: workspace source none: []", file=sys.stderr)
+            print("BROWSER_OFF: no Appraisal Comps folder found, and the session hook "
+                  "didn't report one. Start a new chat with the folder selected.", file=sys.stderr)
+            sys.exit(1)
+        candidates = [handoff_workspace]
+        source = "handoff"
+    # R20: say which source found the workspace, so the desktop check can see it.
     found_names = ", ".join(str(candidate) for candidate in candidates)
-    print(f"launch.py: workspace source {search.source}: [{found_names}]", file=sys.stderr)
+    print(f"launch.py: workspace source {source}: [{found_names}]", file=sys.stderr)
     if len(candidates) != 1:
         print(f"BROWSER_OFF: found {len(candidates)} Appraisal Comps folders, not one", file=sys.stderr)
         sys.exit(1)
