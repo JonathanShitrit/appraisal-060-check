@@ -12,7 +12,7 @@ script, or report the failure to the maintainer.
 """
 from __future__ import annotations
 
-import csv, importlib.util, json, os, shutil, subprocess, sys, tempfile
+import csv, importlib.util, json, os, shutil, stat, subprocess, sys, tempfile
 from pathlib import Path
 
 PRODUCT = Path(__file__).resolve().parents[1]
@@ -348,9 +348,17 @@ def make_workspace(folder):
     return folder
 
 
+def copy_writable(source, target):
+    """Copy a folder with contents only, so the copy is writable even when the
+    source is a read-only install (as the desktop app's plugin cache is)."""
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"),
+                    copy_function=shutil.copyfile)
+    set_tree_writable(target, True)
+
+
 def copy_plugin(into):
     """Copy product/ to `into`, as a standalone plugin install, and return ledger.py's path."""
-    shutil.copytree(PRODUCT, into, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
+    copy_writable(PRODUCT, into)
     return into / "tools/ledger.py"
 
 
@@ -364,7 +372,7 @@ def test_workspace(tmp):
     check("workspace: outside the workspace refused", code == 2 and "no Appraisal Comps folder here" in out, out)
     version = json.loads((PRODUCT / ".claude-plugin/plugin.json").read_text())["version"]
     asg = ws / "assignments/2026-01-05_1-test-st_2a"
-    shutil.copytree(PRODUCT / "templates/assignment", asg)
+    copy_writable(PRODUCT / "templates/assignment", asg)
     run(led, "event", "--assignment", asg, "--stage", "1", "--event", "start", cwd=ws)
     check("workspace: version comes from plugin.json", f",{version}," in (asg / "events.csv").read_text())
     check("workspace: nothing written inside the plugin", not (plugin / "assignments").exists()
@@ -407,9 +415,58 @@ def test_setup(tmp):
           and "kept" in out, out)
 
 
+def unwritable_paths(folder):
+    """Every file and folder under folder (and folder itself) that can't be written."""
+    paths = [folder, *folder.rglob("*")]
+    return [str(path.relative_to(folder)) for path in paths if not os.access(path, os.W_OK)]
+
+
+def set_tree_writable(folder, writable):
+    """Add or remove write permission on folder and everything in it, like an app's read-only install."""
+    for path in [folder, *folder.rglob("*")]:
+        mode = path.stat().st_mode
+        if writable:
+            path.chmod(mode | stat.S_IWUSR)
+        else:
+            path.chmod(mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+
+
+def test_read_only_install(tmp):
+    """The desktop app installs the plugin read-only. Files copied out of it
+    into the workspace must still be writable."""
+    plugin = tmp / "cache/appraisal-comps"
+    copy_plugin(plugin)
+    set_tree_writable(plugin, False)
+    try:
+        ws = tmp / "Appraisal Comps"
+        code, out = run(plugin / "tools/setup_workspace.py", "--into", ws)
+        check("read-only install: setup succeeds", code == 0, out)
+        check("read-only install: workspace files writable", unwritable_paths(ws) == [], unwritable_paths(ws))
+
+        asg = "2026-01-05_1-test-st_2a"
+        code, out = run(plugin / "tools/new_assignment.py", "--name", asg, cwd=ws)
+        check("read-only install: new_assignment succeeds", code == 0 and asg in out, out)
+        check("read-only install: assignment files writable",
+              (ws / "assignments" / asg / "progress.md").is_file()
+              and unwritable_paths(ws / "assignments" / asg) == [], unwritable_paths(ws / "assignments" / asg))
+        code, out = run(plugin / "tools/ledger.py", "event", "--assignment", asg, "--stage", "1",
+                        "--event", "start", cwd=ws)
+        check("read-only install: ledger writes the new assignment's events.csv",
+              code == 0 and (ws / "assignments" / asg / "events.csv").is_file(), out)
+
+        code, out = run(plugin / "tools/new_assignment.py", "--name", asg, cwd=ws)
+        check("new_assignment: existing folder refused", code == 2 and "already exists" in out, out)
+        code, out = run(plugin / "tools/new_assignment.py", "--name", "../escape", cwd=ws)
+        check("new_assignment: name with a path refused", code == 2 and not (tmp / "escape").exists(), out)
+        code, out = run(plugin / "tools/new_assignment.py", "--name", "1 Test St", cwd=ws)
+        check("new_assignment: name without a date refused", code == 2 and "YYYY-MM-DD" in out, out)
+    finally:
+        set_tree_writable(plugin, True)
+
+
 def test_session_start(tmp):
     plugin = tmp / "sp/appraisal-comps"
-    shutil.copytree(PRODUCT, plugin, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
+    copy_writable(PRODUCT, plugin)
     hook = plugin / "hooks/session_start.py"
     env = {"APPRAISAL_COMPS_TEST_LATEST": str(tmp / "missing.json")}
     ws = make_workspace(tmp / "sp/ws")
@@ -440,7 +497,7 @@ def test_session_start(tmp):
     code, out = run_hook(hook, {"hook_event_name": "SessionStart", "cwd": str(fresh)}, cwd=fresh, env=env_ready)
     check("update: newer version offered", "UPDATE_READY 0.7.0" in session_context(out), out[-300:])
     asg = fresh / "assignments/2026-01-05_1-test-st_2a"
-    shutil.copytree(PRODUCT / "templates/assignment", asg)
+    copy_writable(PRODUCT / "templates/assignment", asg)
     write(asg / "events.csv", "timestamp,stage,event,version,note\n2026-01-05T10:00:00,1,start,0.6.0,\n")
     latest.write_text(json.dumps({"version": "0.6.1"}))
     write(fresh / "settings/plugin-state.json", json.dumps({"last_seen_version": "0.6.0"}))
@@ -461,7 +518,7 @@ def test_session_start_host_paths(tmp):
     /private/var/empty) still finds the workspace through
     CLAUDE_CODE_WORKSPACE_HOST_PATHS, so it must not say NO_WORKSPACE."""
     plugin = tmp / "sp/appraisal-comps"
-    shutil.copytree(PRODUCT, plugin, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
+    copy_writable(PRODUCT, plugin)
     hook = plugin / "hooks/session_start.py"
     empty = tmp / "sp/empty"
     empty.mkdir(parents=True, exist_ok=True)
@@ -481,7 +538,7 @@ RULES_MARKER = "Assistant to a licensed NYC residential appraiser"  # rules.md's
 def session_plugin(tmp):
     """A copy of product/ installed as a plugin under tmp, and its SessionStart hook."""
     plugin = tmp / "sp/appraisal-comps"
-    shutil.copytree(PRODUCT, plugin, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
+    copy_writable(PRODUCT, plugin)
     return plugin / "hooks/session_start.py"
 
 
@@ -613,12 +670,12 @@ def test_scorer_close(tmp):
 
 def test_ledger_and_export(tmp):
     plugin = tmp / "plugin/appraisal-comps"
-    shutil.copytree(PRODUCT, plugin, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
+    copy_writable(PRODUCT, plugin)
     root = tmp / "Appraisal Comps"
     write(root / "settings/conventions.md", "# Conventions\n")
     for d in ("shared/buildings", "shared/evals", "exports"):
         (root / d).mkdir(parents=True, exist_ok=True)
-    shutil.copytree(PRODUCT / "templates/assignment", root / "assignments/2026-01-05_1-test-st_2a")
+    copy_writable(PRODUCT / "templates/assignment", root / "assignments/2026-01-05_1-test-st_2a")
     write(root / "shared/evals/calibration.csv", "plan_id,plan_file,plan_type,manual_sqft,notes\n")
     write(root / "shared/evals/runs.csv", "plan_id,run,model,measured_sqft,confidence,date\n")
     write(root / "shared/lessons.md", "# Lessons\n")
@@ -664,7 +721,7 @@ def test_ledger_and_export(tmp):
     # a closed single-family assignment measured from a sketch only (no rooms CSV)
     house_asg = "2026-01-06_2-test-pl"
     house = root / "assignments" / house_asg
-    shutil.copytree(PRODUCT / "templates/assignment", house)
+    copy_writable(PRODUCT / "templates/assignment", house)
     write(house / "subject.json", json.dumps({"address": "2 TEST PL", "unit": "", "bbl": "4000020002",
                                               "building_type": "single-family", "gla_sqft": 1260,
                                               "gla_source": "sketch", "interior_sqft_stated": None,
@@ -913,7 +970,7 @@ def test_guard_missing_workspace_module(tmp):
     partial install), the guard must still deny - never crash and let
     PreToolUse treat a non-zero exit as no opinion (an open gate)."""
     plugin = tmp / "broken-plugin"
-    shutil.copytree(PRODUCT, plugin, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
+    copy_writable(PRODUCT, plugin)
     (plugin / "tools/workspace.py").unlink()
     code, out = run_hook(plugin / "hooks/guard.py",
                           {"hook_event_name": "PreToolUse", "tool_name": "Write",
@@ -930,7 +987,8 @@ def main():
         SAFE_HOME.mkdir()
         for fn in (test_plan_area, test_plan_outline, test_plan_sketch, test_bracket, test_nyc_sales,
                    test_scorer, test_scorer_close, test_workspace, test_workspace_host_paths,
-                   test_workspace_mnt, test_workspace_several, test_setup, test_session_start,
+                   test_workspace_mnt, test_workspace_several, test_setup, test_read_only_install,
+                   test_session_start,
                    test_session_start_host_paths, test_session_start_resilience,
                    test_session_browser_off,
                    test_scorer_workspace_defaults, test_skill_paths, test_ledger_and_export, test_browser,

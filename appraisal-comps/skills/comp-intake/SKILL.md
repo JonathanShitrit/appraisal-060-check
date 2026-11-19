@@ -10,7 +10,7 @@ Goal: one subject record, saved to disk, that every later stage reads instead of
 ## Steps
 
 1. Read the appraiser's message. Fill what you can of the subject record below. Ask for everything missing in ONE short question. Do not guess a BBL, unit, or effective date.
-2. Create the assignment folder `assignments/<today's date YYYY-MM-DD>_<street-number>-<street>_<unit>/` (houses with no unit: drop `_<unit>`) by copying `${CLAUDE_PLUGIN_ROOT}/templates/assignment/`. Use the property address only. Never put client, borrower, lender or AMC names in any file or folder name.
+2. Create the assignment folder: `python3 -I ${CLAUDE_PLUGIN_ROOT}/tools/new_assignment.py --name <today's date YYYY-MM-DD>_<street-number>-<street>_<unit>` (houses with no unit: drop `_<unit>`). Don't copy `templates/assignment/` by hand: the plugin is installed read-only, and a plain copy stays read-only. Use the property address only. Never put client, borrower, lender or AMC names in any file or folder name.
 3. Log the start: `${CLAUDE_PLUGIN_ROOT}/tools/ledger.py event --assignment <folder> --stage 1 --event start`.
 4. Pull subject facts:
    `python3 -I ${CLAUDE_PLUGIN_ROOT}/skills/comp-pool/scripts/nyc_sales.py subject --bbl <BBL>`

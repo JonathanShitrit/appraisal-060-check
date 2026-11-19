@@ -4,13 +4,14 @@ Release steps: `maintainer/Maintainer Checklist.md` step 10.
 
 ## 0.6.0 (2026-11-18)
 
-Principles touched (`docs/Design Principles.md`): deterministic limits, real checks, one rule in one place, simplest setup that works. **The workflow ships as the `appraisal-comps` plugin, with phase 1 (0.5.0) inside it.**
+Principles touched (`docs/Design Principles.md`): deterministic limits, real checks, one rule in one place, simplest setup that works, scripts beat narrow tools. **The workflow ships as the `appraisal-comps` plugin, with phase 1 (0.5.0) inside it.**
 
 What changed:
 - The rules load from the plugin at every session start; nothing to save or paste by hand after an update. The session start also runs migrations on a new version and checks once a day for an update; Claude asks before you install one. There's no one-step undo; a bad release is fixed by the next one.
 - A guard enforces protected files (`calibration.csv`, `settings/sites.json`, the plugin's own files), the data-host allowlist and the browser limits. It denies web search.
 - Read-tier browser (its own logged-in profile; needs Node): Claude reads pages only on sites you enabled in `settings/sites.json`, with `origin` and `terms_checked_on` filled in by you. Edits to that file take effect in a new chat.
 - New setup skill. `score_calibration.py` reads `shared/evals/` when given no file names.
+- The app installs the plugin read-only, and a plain copy keeps that. Setup and the new `tools/new_assignment.py` (used by comp-intake) copy file contents only, so the folder's files and each new assignment stay writable. The tests now pass from a read-only install too.
 - Maintainer: `release.py` publishes the plugin to the releases repo as a marketplace.
 - Docs: one home per topic. `docs/How to Update.md` is gone (Claude gives the install steps; the README's update loop covers the rest), and the network rule in `rules.md` is one bullet.
 

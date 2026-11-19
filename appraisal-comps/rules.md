@@ -30,7 +30,7 @@ At the start, every checkpoint, the appraiser's answer, and the end of each stag
 | `settings/sites.json` | appraiser | browser sites |
 | `settings/plugin-state.json` | the hook | `last_seen_version`, `last_check_date`, `latest_version`, `last_check_result`. Never edited by hand. |
 | `shared/` | both | `buildings/lines.csv` (every line measurement), `buildings/<billing-BBL>.md` (building notes), `corrections.csv`, `lessons.md`, `evals/`. Goes out only through an approved export. |
-| `assignments/` | appraiser | One folder per job, copied from `${CLAUDE_PLUGIN_ROOT}/templates/assignment/`. Never leaves this computer. Never synced, zipped or exported. |
+| `assignments/` | appraiser | One folder per job, made by `${CLAUDE_PLUGIN_ROOT}/tools/new_assignment.py` from `templates/assignment/`. Never leaves this computer. Never synced, zipped or exported. |
 | `exports/` | appraiser | Pending and approved learning exports. The appraiser decides whether to send them. |
 
 ## State lives in files, not in the chat
