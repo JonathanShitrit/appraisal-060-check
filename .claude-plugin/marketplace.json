@@ -1,0 +1,11 @@
+{
+  "name": "appraisal-comps",
+  "owner": {"name": "Jonathan Shitrit"},
+  "plugins": [
+    {
+      "name": "appraisal-comps",
+      "source": "./appraisal-comps",
+      "description": "Desktop check build"
+    }
+  ]
+}
